@@ -2,8 +2,7 @@ package kv
 
 import (
 	"context"
-	"io"
-	"io/ioutil"
+	"fmt"
 
 	"github.com/pkg/errors"
 	types "github.com/prysmaticlabs/eth2-types"
@@ -16,44 +15,45 @@ import (
 // (ex: an open file) prepares the database so that the beacon node can begin
 // syncing, using the provided values as their point of origin. This is an alternative
 // to syncing from genesis, and should only be run on an empty database.
-func (s *Store) SaveOrigin(ctx context.Context, stateReader, blockReader io.Reader) error {
-	sb, err := ioutil.ReadAll(stateReader)
+func (s *Store) SaveOrigin(ctx context.Context, serState, serBlock []byte) error {
+	cf, err := detect.FromState(serState)
 	if err != nil {
-		return errors.Wrap(err, "failed to read origin state bytes")
+		return errors.Wrap(err, "could not sniff config+fork for origin state bytes")
 	}
-	bb, err := ioutil.ReadAll(blockReader)
-	if err != nil {
-		return errors.Wrap(err, "error reading block given to SaveOrigin")
-	}
-
-	cf, err := detect.FromState(sb)
-	if err != nil {
-		return errors.Wrap(err, "failed to detect config and fork for origin state")
-	}
-	bs, err := cf.UnmarshalBeaconState(sb)
-	if err != nil {
-		return errors.Wrap(err, "could not unmarshal origin state")
-	}
-	wblk, err := cf.UnmarshalBeaconBlock(bb)
-	if err != nil {
-		return errors.Wrap(err, "unable to unmarshal origin SignedBeaconBlock")
+	_, ok := params.BeaconConfig().ForkVersionSchedule[cf.Version]
+	if !ok {
+		return fmt.Errorf("config mismatch, beacon node configured to connect to %s, detected state is for %s", params.BeaconConfig().ConfigName, cf.ConfigName())
 	}
 
-	blockRoot, err := wblk.Block().HashTreeRoot()
+	log.Printf("detected supported config for state & block version detection, name=%s, fork=%s", cf.ConfigName(), cf.Fork)
+	state, err := cf.UnmarshalBeaconState(serState)
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize origin state w/ bytes + config+fork")
+	}
+
+	wblk, err := cf.UnmarshalBeaconBlock(serBlock)
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize origin block w/ bytes + config+fork")
+	}
+	blk := wblk.Block()
+
+	// save block
+	blockRoot, err := blk.HashTreeRoot()
 	if err != nil {
 		return errors.Wrap(err, "could not compute HashTreeRoot of checkpoint block")
 	}
-	// save block
+	log.Infof("saving checkpoint block to db, w/ root=%#x", blockRoot)
 	if err := s.SaveBlock(ctx, wblk); err != nil {
 		return errors.Wrap(err, "could not save checkpoint block")
 	}
 
 	// save state
-	if err = s.SaveState(ctx, bs, blockRoot); err != nil {
+	log.Infof("calling SaveState w/ blockRoot=%x", blockRoot)
+	if err = s.SaveState(ctx, state, blockRoot); err != nil {
 		return errors.Wrap(err, "could not save state")
 	}
 	if err = s.SaveStateSummary(ctx, &ethpb.StateSummary{
-		Slot: bs.Slot(),
+		Slot: state.Slot(),
 		Root: blockRoot[:],
 	}); err != nil {
 		return errors.Wrap(err, "could not save state summary")
@@ -61,7 +61,7 @@ func (s *Store) SaveOrigin(ctx context.Context, stateReader, blockReader io.Read
 
 	// save origin block root in special key, to be used when the canonical
 	// origin (start of chain, ie alternative to genesis) block or state is needed
-	if err = s.SaveOriginBlockRoot(ctx, blockRoot); err != nil {
+	if err = s.SaveOriginCheckpointBlockRoot(ctx, blockRoot); err != nil {
 		return errors.Wrap(err, "could not save origin block root")
 	}
 
