@@ -32,6 +32,16 @@ type VersionedUnmarshaler struct {
 	Version [fieldparams.VersionLength]byte
 }
 
+// ConfigName returns the name of the beacon chain config used by the VersionUnmarshaler.
+func (vu *VersionedUnmarshaler) ConfigName() string {
+	return vu.Config.ConfigName
+}
+
+// ForkName returns the name of the fork version used by the VersionUnmarshaler.
+func (vu *VersionedUnmarshaler) ForkName() string {
+	return version.String(vu.Fork)
+}
+
 var beaconStateCurrentVersion = fieldSpec{
 	// 52 = 8 (genesis_time) + 32 (genesis_validators_root) + 8 (slot) + 4 (previous_version)
 	offset: 52,

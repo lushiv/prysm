@@ -21,8 +21,8 @@ import (
 	"github.com/pkg/errors"
 	types "github.com/prysmaticlabs/eth2-types"
 	"github.com/prysmaticlabs/prysm/beacon-chain/rpc/apimiddleware"
-	"github.com/prysmaticlabs/prysm/config/params"
 	"github.com/prysmaticlabs/prysm/encoding/bytesutil"
+	"github.com/prysmaticlabs/prysm/network/forks"
 	ethpb "github.com/prysmaticlabs/prysm/proto/prysm/v1alpha1"
 	log "github.com/sirupsen/logrus"
 )
@@ -236,7 +236,7 @@ func (c *Client) GetFork(ctx context.Context, stateId StateOrBlockId) (*ethpb.Fo
 }
 
 // GetForkSchedule retrieve all forks, past present and future, of which this node is aware.
-func (c *Client) GetForkSchedule(ctx context.Context) (params.OrderedForkSchedule, error) {
+func (c *Client) GetForkSchedule(ctx context.Context) (forks.OrderedSchedule, error) {
 	body, err := c.get(ctx, get_fork_schedule_path)
 	if err != nil {
 		return nil, errors.Wrap(err, "error requesting fork schedule")
@@ -393,8 +393,8 @@ type forkScheduleResponse struct {
 	Data []forkResponse
 }
 
-func (fsr *forkScheduleResponse) OrderedForkSchedule() (params.OrderedForkSchedule, error) {
-	ofs := make(params.OrderedForkSchedule, 0)
+func (fsr *forkScheduleResponse) OrderedForkSchedule() (forks.OrderedSchedule, error) {
+	ofs := make(forks.OrderedSchedule, 0)
 	for _, d := range fsr.Data {
 		epoch, err := strconv.Atoi(d.Epoch)
 		if err != nil {
@@ -408,7 +408,7 @@ func (fsr *forkScheduleResponse) OrderedForkSchedule() (params.OrderedForkSchedu
 			return nil, fmt.Errorf("got %d byte version, expected 4 bytes. version hex=%s", len(vSlice), d.CurrentVersion)
 		}
 		version := bytesutil.ToBytes4(vSlice)
-		ofs = append(ofs, params.ForkScheduleEntry{
+		ofs = append(ofs, forks.ForkScheduleEntry{
 			Version: version,
 			Epoch:   types.Epoch(uint64(epoch)),
 		})

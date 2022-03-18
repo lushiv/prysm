@@ -11,7 +11,7 @@ import (
 	"github.com/prysmaticlabs/prysm/beacon-chain/core/helpers"
 	"github.com/prysmaticlabs/prysm/beacon-chain/state"
 	"github.com/prysmaticlabs/prysm/config/params"
-	"github.com/prysmaticlabs/prysm/proto/detect"
+	"github.com/prysmaticlabs/prysm/encoding/ssz/detect"
 	"github.com/prysmaticlabs/prysm/proto/prysm/v1alpha1/block"
 	"github.com/prysmaticlabs/prysm/time/slots"
 	log "github.com/sirupsen/logrus"
@@ -44,7 +44,7 @@ type OriginData struct {
 	bb  []byte
 	st  state.BeaconState
 	b   block.SignedBeaconBlock
-	cf  *detect.ConfigFork
+	vu  *detect.VersionedUnmarshaler
 }
 
 // WeakSubjectivity returns the WeakSubjectivityData determined by DownloadOriginData.
@@ -55,14 +55,14 @@ func (od *OriginData) WeakSubjectivity() *WeakSubjectivityData {
 // SaveBlock saves the downloaded block to a unique file in the given path.
 // For readability and collision avoidance, the file name includes: type, config name, slot and root
 func (od *OriginData) SaveBlock(dir string) (string, error) {
-	statePath := path.Join(dir, fname("state", od.cf, od.st.Slot(), od.wsd.BlockRoot))
+	statePath := path.Join(dir, fname("state", od.vu, od.st.Slot(), od.wsd.BlockRoot))
 	return statePath, os.WriteFile(statePath, od.sb, 0600)
 }
 
 // SaveState saves the downloaded state to a unique file in the given path.
 // For readability and collision avoidance, the file name includes: type, config name, slot and root
 func (od *OriginData) SaveState(dir string) (string, error) {
-	statePath := path.Join(dir, fname("state", od.cf, od.st.Slot(), od.wsd.StateRoot))
+	statePath := path.Join(dir, fname("state", od.vu, od.st.Slot(), od.wsd.StateRoot))
 	return statePath, os.WriteFile(statePath, od.sb, 0600)
 }
 
@@ -76,8 +76,8 @@ func (od *OriginData) BlockBytes() []byte {
 	return od.bb
 }
 
-func fname(prefix string, cf *detect.ConfigFork, slot types.Slot, root [32]byte) string {
-	return fmt.Sprintf("%s_%s_%s_%d-%#x.ssz", prefix, cf.ConfigName.String(), cf.Fork.String(), slot, root)
+func fname(prefix string, vu *detect.VersionedUnmarshaler, slot types.Slot, root [32]byte) string {
+	return fmt.Sprintf("%s_%s_%s_%d-%#x.ssz", prefix, vu.ConfigName(), vu.ForkName(), slot, root)
 }
 
 // this method downloads the head state, which can be used to find the correct chain config
@@ -87,18 +87,18 @@ func getWeakSubjectivityEpochFromHead(ctx context.Context, client *Client) (type
 	if err != nil {
 		return 0, err
 	}
-	cf, err := detect.ByState(headBytes)
+	vu, err := detect.FromState(headBytes)
 	if err != nil {
 		return 0, errors.Wrap(err, "error detecting chain config for beacon state")
 	}
-	log.Printf("detected supported config in remote head state, name=%s, fork=%s", cf.ConfigName.String(), cf.Fork)
-	headState, err := cf.UnmarshalBeaconState(headBytes)
+	log.Printf("detected supported config in remote head state, name=%s, fork=%s", vu.ConfigName(), vu.ForkName())
+	headState, err := vu.UnmarshalBeaconState(headBytes)
 	if err != nil {
 		return 0, errors.Wrap(err, "error unmarshaling state to correct version")
 	}
 
 	// LatestWeakSubjectivityEpoch uses package-level vars from the params package, so we need to override it
-	params.OverrideBeaconConfig(cf.Config)
+	params.OverrideBeaconConfig(vu.Config)
 	epoch, err := helpers.LatestWeakSubjectivityEpoch(ctx, headState)
 	if err != nil {
 		return 0, errors.Wrap(err, "error computing the weak subjectivity epoch from head state")
@@ -149,14 +149,14 @@ func downloadBackwardsCompatible(ctx context.Context, client *Client) (*OriginDa
 		return nil, errors.Wrapf(err, "failed to request state by slot from api, slot=%d", slot)
 	}
 
-	// ConfigFork is used to unmarshal the BeaconState so we can read the block root in latest_block_header
-	cf, err := detect.ByState(stateBytes)
+	// VersionUnmarshaler is used to unmarshal the BeaconState so we can read the block root in latest_block_header
+	vu, err := detect.FromState(stateBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "error detecting chain config for beacon state")
 	}
-	log.Printf("detected supported config in checkpoint state, name=%s, fork=%s", cf.ConfigName.String(), cf.Fork)
+	log.Printf("detected supported config in checkpoint state, name=%s, fork=%s", vu.ConfigName(), vu.ForkName())
 
-	st, err := cf.UnmarshalBeaconState(stateBytes)
+	st, err := vu.UnmarshalBeaconState(stateBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "error using detected config fork to unmarshal state bytes")
 	}
@@ -178,7 +178,7 @@ func downloadBackwardsCompatible(ctx context.Context, client *Client) (*OriginDa
 	if err != nil {
 		return nil, errors.Wrapf(err, "error requesting block by slot = %d", slot)
 	}
-	block, err := cf.UnmarshalBeaconBlock(blockBytes)
+	block, err := vu.UnmarshalBeaconBlock(blockBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to unmarshal block to a supported type using the detected fork schedule")
 	}
@@ -201,7 +201,7 @@ func downloadBackwardsCompatible(ctx context.Context, client *Client) (*OriginDa
 		sb: stateBytes,
 		b:  block,
 		bb: blockBytes,
-		cf: cf,
+		vu: vu,
 	}, nil
 }
 
@@ -234,13 +234,13 @@ func DownloadOriginData(ctx context.Context, client *Client) (*OriginData, error
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to request state by slot from api, slot=%d", slot)
 	}
-	cf, err := detect.ByState(stateBytes)
+	vu, err := detect.FromState(stateBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "error detecting chain config for beacon state")
 	}
-	log.Printf("detected supported config in checkpoint state, name=%s, fork=%s", cf.ConfigName.String(), cf.Fork)
+	log.Printf("detected supported config in checkpoint state, name=%s, fork=%s", vu.ConfigName(), vu.ForkName())
 
-	state, err := cf.UnmarshalBeaconState(stateBytes)
+	state, err := vu.UnmarshalBeaconState(stateBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "error using detected config fork to unmarshal state bytes")
 	}
@@ -257,7 +257,7 @@ func DownloadOriginData(ctx context.Context, client *Client) (*OriginData, error
 	if err != nil {
 		return nil, errors.Wrapf(err, "error requesting block by slot = %d", slot)
 	}
-	block, err := cf.UnmarshalBeaconBlock(blockBytes)
+	block, err := vu.UnmarshalBeaconBlock(blockBytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to unmarshal block to a supported type using the detected fork schedule")
 	}
@@ -274,6 +274,6 @@ func DownloadOriginData(ctx context.Context, client *Client) (*OriginData, error
 		b:   block,
 		sb:  stateBytes,
 		bb:  blockBytes,
-		cf:  cf,
+		vu:  vu,
 	}, nil
 }
