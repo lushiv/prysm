@@ -293,6 +293,7 @@ func (s *Service) Start() {
 		HeadFetcher:             s.cfg.HeadFetcher,
 		VoluntaryExitsPool:      s.cfg.ExitPool,
 		V1Alpha1ValidatorServer: validatorServer,
+		SyncChecker:             s.cfg.SyncService,
 	}
 	ethpbv1alpha1.RegisterNodeServer(s.grpcServer, nodeServer)
 	ethpbservice.RegisterBeaconNodeServer(s.grpcServer, nodeServerV1)
