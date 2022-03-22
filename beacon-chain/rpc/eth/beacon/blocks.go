@@ -63,22 +63,17 @@ func (bs *Server) GetWeakSubjectivity(ctx context.Context, _ *empty.Empty) (*eth
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "could not get weak subjectivity slot: %v", err)
 	}
-	blks, err := bs.BeaconDB.HighestSlotBlocksBelow(ctx, wsSlot+1)
+	cbr, cb, err := bs.CanonicalHistory.BlockForSlot(ctx, wsSlot)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, fmt.Sprintf("could not find highest block below slot %d", wsSlot))
 	}
-	block := blks[0]
-	blockRoot, err := block.Block().HashTreeRoot()
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, fmt.Sprintf("failed to compute hash_tree_root for block at slot=%d", block.Block().Slot()))
-	}
-	stateRoot := bytesutil.ToBytes32(block.Block().StateRoot())
-	log.Printf("weak subjectivity checkpoint reported as epoch=%d, block root=%#x, state root=%#x", wsEpoch, blockRoot, stateRoot)
+	stateRoot := bytesutil.ToBytes32(cb.Block().StateRoot())
+	log.Printf("weak subjectivity checkpoint reported as epoch=%d, block root=%#x, state root=%#x", wsEpoch, cbr, stateRoot)
 	return &ethpbv1.WeakSubjectivityResponse{
 		Data: &ethpbv1.WeakSubjectivityData{
 			WsCheckpoint: &ethpbv1.Checkpoint{
 				Epoch: wsEpoch,
-				Root:  blockRoot[:],
+				Root:  cbr[:],
 			},
 			StateRoot: stateRoot[:],
 		},

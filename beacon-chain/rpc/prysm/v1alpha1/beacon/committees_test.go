@@ -76,10 +76,10 @@ func TestServer_ListBeaconCommittees_CurrentEpoch(t *testing.T) {
 func addDefaultReplayerBuilder(s *Server, h stategen.HistoryAccessor) {
 	cc := &mockstategen.MockCanonicalChecker{Is: true, Err: nil}
 	cs := &mockstategen.MockCurrentSlotter{Slot: math.MaxUint64 - 1}
-	s.ReplayerBuilder = stategen.NewCanonicalBuilder(h, cc, cs)
+	ch := stategen.NewCanonicalHistory(h, cc, cs)
+	s.ReplayerBuilder = ch
 }
 
-// TODO: test failure
 func TestServer_ListBeaconCommittees_PreviousEpoch(t *testing.T) {
 	params.SetupTestConfigCleanup(t)
 	params.OverrideBeaconConfig(params.MainnetConfig())

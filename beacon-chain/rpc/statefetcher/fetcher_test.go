@@ -75,9 +75,10 @@ func TestGetState(t *testing.T) {
 
 		cc := &mockstategen.MockCanonicalChecker{Is: true}
 		cs := &mockstategen.MockCurrentSlotter{Slot: bs.Slot() + 1}
+		ch := stategen.NewCanonicalHistory(db, cc, cs)
 		p := StateProvider{
 			BeaconDB:        db,
-			ReplayerBuilder: stategen.NewCanonicalBuilder(db, cc, cs),
+			ReplayerBuilder: ch,
 		}
 
 		s, err := p.State(ctx, []byte("genesis"))

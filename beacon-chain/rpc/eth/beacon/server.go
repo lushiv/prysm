@@ -36,4 +36,5 @@ type Server struct {
 	HeadFetcher             blockchain.HeadFetcher
 	V1Alpha1ValidatorServer *v1alpha1validator.Server
 	SyncChecker             sync.Checker
+	CanonicalHistory        *stategen.CanonicalHistory
 }
